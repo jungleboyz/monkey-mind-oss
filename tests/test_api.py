@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 
 # ------------------------------------------------------------------ #
@@ -79,9 +80,11 @@ def client(tmp_path):
     # Track whether auth was called
     _auth_log_db = store.db_path
 
-    async def _mock_auth(api_key=None, request=None):
+    async def _mock_auth(request: Request = None):  # type: ignore[assignment]
+        from fastapi import HTTPException
+
+        api_key = request.headers.get("x-api-key") if request else None
         if api_key != VALID_KEY:
-            # Still write to auth_log to satisfy test_auth_log_written
             import datetime
 
             con = sqlite3.connect(_auth_log_db)
@@ -92,8 +95,6 @@ def client(tmp_path):
             )
             con.commit()
             con.close()
-            from fastapi import HTTPException
-
             raise HTTPException(status_code=401, detail="Unauthorized")
         return store
 
@@ -151,7 +152,7 @@ def test_query_success(client):
         "staleness_warnings": [],
     }
 
-    with patch("mm.api.server.QueryEngine") as MockQE:
+    with patch("mm.api.query.QueryEngine") as MockQE:
         instance = MockQE.return_value
         instance.retrieve.return_value = mock_chunks
         instance.synthesise.return_value = mock_result
