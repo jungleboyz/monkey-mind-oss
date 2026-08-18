@@ -1,0 +1,8 @@
+title = "Monkey Mind gitleaks config"
+
+[allowlist]
+description = "Ignore third-party dependencies in .venv"
+paths = [
+    '''.venv''',
+    '''venv''',
+]
