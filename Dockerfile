@@ -11,16 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv for fast dependency resolution
 RUN pip install uv --no-cache-dir
 
-# Copy dependency files first (layer caching)
+# Copy dependency files and source BEFORE install (source must be present for package entry points)
 COPY pyproject.toml ./
 COPY README.md ./
-
-# Install dependencies
-RUN uv pip install --system --no-cache ".[dev]"
-
-# Copy source
 COPY mm/ ./mm/
 COPY tests/ ./tests/
+
+# Install dependencies (source is now present so entry points resolve correctly)
+RUN uv pip install --system --no-cache ".[dev]"
 
 # Data directory (mounted as volume in production)
 RUN mkdir -p /data
