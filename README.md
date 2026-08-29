@@ -75,7 +75,7 @@ See **[docs/quickstart.md](docs/quickstart.md)** for the complete walkthrough:
 - **Knowledge boundary** — says "I don't know" instead of hallucinating
 - **MCP server** — connects to Claude Desktop, Cursor, and any MCP-compatible tool
 - **REST API** — documented, authenticated, OpenAPI spec included
-- **Pluggable connectors** — file upload and GitHub out of the box; community builds the rest
+- **Pluggable connectors** — `files` and `github` built-in; community builds the rest
 - **Self-hosted** — your data never leaves your machine
 - **Model-agnostic** — bring your own OpenAI, Anthropic, or Ollama keys
 
