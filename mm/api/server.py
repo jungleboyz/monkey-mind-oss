@@ -74,7 +74,29 @@ async def get_user_store(
             pass
 
     if matched_store is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        if not api_key:
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Missing API key. Pass your key via the X-API-Key header: "
+                    "X-API-Key: mm_sk_<your-key>"
+                ),
+            )
+        if not api_key.startswith("mm_sk_"):
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Invalid API key format. Keys must start with 'mm_sk_'. "
+                    "Generate one with: mm keys generate"
+                ),
+            )
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "Invalid API key. Pass your key via the X-API-Key header: "
+                "X-API-Key: mm_sk_<your-key>"
+            ),
+        )
 
     return matched_store
 
