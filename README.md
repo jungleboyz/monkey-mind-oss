@@ -64,7 +64,7 @@ docker compose exec api monkey-mind ingest --connector files --user yourname
 
 # 5. Query
 curl -X POST http://localhost:8000/query \
-  -H "Authorization: Bearer mm_sk_..." \
+  -H "Authorization: Bearer mm_sk_YOUR_KEY_HERE" \
   -H "Content-Type: application/json" \
   -d '{"query": "What should I focus on this week?"}'
 ```
