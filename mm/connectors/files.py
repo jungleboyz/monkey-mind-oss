@@ -194,7 +194,16 @@ class FilesConnector(BaseConnector):
             files = [path]
         else:
             files = []
-            for f in path.rglob("*"):
+            _walk = path.rglob("*")
+            while True:
+                try:
+                    f = next(_walk)
+                except StopIteration:
+                    break
+                except PermissionError as exc:
+                    import warnings
+                    warnings.warn(f"Skipping unreadable path: {exc}")
+                    continue
                 # Skip hidden / noise dirs
                 if any(part in SKIP_DIRS for part in f.parts):
                     continue
