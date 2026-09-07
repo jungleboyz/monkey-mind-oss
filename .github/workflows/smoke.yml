@@ -1,0 +1,30 @@
+name: Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run smoke test (fast mode — HTTP surface only)
+        env:
+          # Real API keys not available in CI — smoke test uses SMOKE_FAST=1
+          # which validates: build → up → health → user create → auth rejection
+          # Full ingest+query path runs locally before PR merge.
+          SMOKE_FAST: "1"
+          OPENAI_API_KEY: "sk-smoke-placeholder"
+          ANTHROPIC_API_KEY: "sk-ant-smoke-placeholder"
+        run: |
+          chmod +x scripts/smoke-test.sh
+          bash scripts/smoke-test.sh
