@@ -13,7 +13,8 @@ from pathlib import Path
 
 import typer
 
-DATA_ROOT = Path.home() / ".monkey-mind"
+import os
+DATA_ROOT = Path(os.environ.get('DATA_ROOT', str(Path.home() / '.monkey-mind')))
 
 
 def run_wizard() -> None:
