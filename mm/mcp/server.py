@@ -290,8 +290,9 @@ def main() -> None:
     if args.transport == "stdio":
         asyncio.run(mcp.run_stdio_async())
     else:
-        # HTTP / streamable-http (Cursor)
-        asyncio.run(mcp.run_streamable_http_async(host="127.0.0.1", port=args.port))
+        # HTTP / streamable-http — bind to 0.0.0.0 for Railway/remote deployments
+        host = os.environ.get("MCP_HOST", "0.0.0.0")
+        asyncio.run(mcp.run_streamable_http_async(host=host, port=args.port))
 
 
 if __name__ == "__main__":
