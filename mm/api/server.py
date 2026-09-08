@@ -231,6 +231,10 @@ async def ingest_files(
         # Load user config (needed by FilesConnector)
         user_config = UserConfig.load(store.config_path) if store.config_path.exists() else UserConfig.default(store.user_id)
 
+        # Ensure all user dirs exist (db, chroma, context)
+        for d in (store.context_dir, store.chroma_dir, store.db_path.parent):
+            d.mkdir(parents=True, exist_ok=True)
+
         # Build connector
         connector = FilesConnector(
             config={"path": str(tmp_dir)},
