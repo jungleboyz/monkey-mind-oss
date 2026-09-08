@@ -16,6 +16,7 @@ COPY pyproject.toml ./
 COPY README.md ./
 COPY mm/ ./mm/
 COPY tests/ ./tests/
+COPY scripts/ ./scripts/
 
 # Install dependencies (source is now present so entry points resolve correctly)
 RUN uv pip install --system --no-cache ".[dev]"
