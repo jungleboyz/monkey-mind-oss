@@ -14,7 +14,8 @@ domain_app = typer.Typer(help="Manage knowledge domains in config.yaml.")
 app.add_typer(user_app, name="user")
 app.add_typer(domain_app, name="domain")
 
-DATA_ROOT = Path.home() / '.monkey-mind'
+import os
+DATA_ROOT = Path(os.environ.get('DATA_ROOT', str(Path.home() / '.monkey-mind')))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
