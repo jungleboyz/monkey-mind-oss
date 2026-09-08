@@ -137,6 +137,7 @@ async def bootstrap():
         raise HTTPException(status_code=409, detail=f"User '{user_id}' already bootstrapped.")
 
     raw_key, hashed = generate_key()
+    store.user_dir.mkdir(parents=True, exist_ok=True)
     save_key_hash(store.user_dir, hashed)
     # Ensure config exists
     store.get_config()
