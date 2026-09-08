@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import datetime
 import os
+import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
@@ -122,6 +124,25 @@ async def health():
     return {"status": "ok"}
 
 
+@app.post("/bootstrap")
+async def bootstrap():
+    """One-time user bootstrap. Creates the USER_ID user and returns an API key.
+    Fails if user already has a key (idempotent-safe)."""
+    from mm.auth.keys import generate_key, save_key_hash
+
+    user_id = os.environ.get("USER_ID", "rob")
+    store = UserStore(DATA_ROOT, user_id)
+
+    if load_key_hash(store.user_dir) is not None:
+        raise HTTPException(status_code=409, detail=f"User '{user_id}' already bootstrapped.")
+
+    raw_key, hashed = generate_key()
+    save_key_hash(store.user_dir, hashed)
+    # Ensure config exists
+    store.get_config()
+    return {"user_id": user_id, "api_key": raw_key}
+
+
 @app.post("/query")
 async def query(body: QueryRequest, store: UserStore = Depends(get_user_store)):
     from mm.api.query import QueryEngine
@@ -183,3 +204,46 @@ async def get_page(path: str, store: UserStore = Depends(get_user_store)):
     if row is None:
         raise HTTPException(status_code=404, detail="Page not found")
     return dict(row)
+
+
+@app.post("/ingest/files")
+async def ingest_files(
+    files: list[UploadFile] = File(...),
+    store: UserStore = Depends(get_user_store),
+):
+    """Accept uploaded files and ingest them into the user's context library."""
+    from mm.connectors.files import FilesConnector
+    from mm.config.user import UserConfig
+    from mm.embedding.providers import EmbeddingProvider
+    from mm.ingestion.runner import run_connector
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="mm_ingest_"))
+    try:
+        # Write uploaded files to temp dir, preserving relative paths
+        for upload in files:
+            filename = upload.filename or "file.md"
+            dest = tmp_dir / filename
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            content = await upload.read()
+            dest.write_bytes(content)
+
+        # Load user config (needed by FilesConnector)
+        user_config = UserConfig.load(store.config_path) if store.config_path.exists() else UserConfig.default(store.user_id)
+
+        # Build connector
+        connector = FilesConnector(
+            config={"path": str(tmp_dir)},
+            user_config=user_config,
+        )
+
+        # Build embed provider from env (MM_EMBED_PROVIDER / OPENAI_API_KEY)
+        embed_provider = EmbeddingProvider.from_config({
+            "provider": os.environ.get("MM_EMBED_PROVIDER", "openai"),
+            "model": os.environ.get("MM_EMBED_MODEL", "text-embedding-3-small"),
+            "api_key": os.environ.get("OPENAI_API_KEY"),
+        })
+
+        result = run_connector(connector, store, embed_provider)
+        return {"status": "ok", **result}
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
