@@ -135,9 +135,21 @@ class OAuthMCPMiddleware:
             token = headers.get(b"x-api-key", b"").decode("utf-8", errors="replace")
 
         if not token or not self._verify(token):
-            await self._send_json(send, 401, {
+            base_url = os.environ.get("MCP_BASE_URL", "")
+            www_auth = f'Bearer realm="Monkey Mind", resource_metadata="{base_url}/.well-known/oauth-authorization-server"'
+            body = json.dumps({
                 "detail": "Unauthorized. Use OAuth client credentials (/token) or X-API-Key header."
+            }).encode()
+            await send({
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    [b"content-type", b"application/json"],
+                    [b"content-length", str(len(body)).encode()],
+                    [b"www-authenticate", www_auth.encode()],
+                ],
             })
+            await send({"type": "http.response.body", "body": body})
             return
 
         await self.app(scope, receive, send)
