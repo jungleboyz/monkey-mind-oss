@@ -121,6 +121,11 @@ class OAuthMCPMiddleware:
             await self._handle_token(scope, receive, send)
             return
 
+        # /.well-known/ is public — OAuth discovery metadata
+        if scope["type"] == "http" and path.startswith(b"/.well-known/"):
+            await self.app(scope, receive, send)
+            return
+
         # All other paths — validate Bearer or X-API-Key
         headers = {k.lower(): v for k, v in scope.get("headers", [])}
 
