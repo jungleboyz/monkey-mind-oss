@@ -80,7 +80,7 @@ CREATE_OUT=$(docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" exec -T api
 info "user create output: $CREATE_OUT"
 
 # Extract key — output format: "  API key (shown once, store it safely):\n\n  <key>"
-API_KEY=$(echo "$CREATE_OUT" | grep -oE 'mm_sk_[a-f0-9]+' | head -1 || true)
+API_KEY=$(echo "$CREATE_OUT" | grep -oE 'mm_sk_[A-Za-z0-9]+' | head -1 || true)
 
 if [ -n "$API_KEY" ]; then
   green "API key generated (${#API_KEY} chars)"
