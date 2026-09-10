@@ -291,8 +291,15 @@ def main() -> None:
         asyncio.run(mcp.run_stdio_async())
     else:
         # HTTP / streamable-http — bind to 0.0.0.0 for Railway/remote deployments
+        # Wrapped with ApiKeyMiddleware to enforce X-API-Key auth on remote connections.
+        import uvicorn
+        from mm.mcp.auth import ApiKeyMiddleware
         host = os.environ.get("MCP_HOST", "0.0.0.0")
-        asyncio.run(mcp.run_streamable_http_async(host=host, port=args.port))
+        starlette_app = mcp.streamable_http_app()
+        protected_app = ApiKeyMiddleware(starlette_app)
+        config = uvicorn.Config(protected_app, host=host, port=args.port, log_level="info")
+        server = uvicorn.Server(config)
+        asyncio.run(server.serve())
 
 
 if __name__ == "__main__":
