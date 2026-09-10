@@ -291,12 +291,35 @@ def main() -> None:
         asyncio.run(mcp.run_stdio_async())
     else:
         # HTTP / streamable-http — bind to 0.0.0.0 for Railway/remote deployments
-        # Wrapped with ApiKeyMiddleware to enforce X-API-Key auth on remote connections.
+        # Wrapped with OAuthMCPMiddleware: handles /token (client credentials) and
+        # validates Bearer / X-API-Key on all MCP requests.
         import uvicorn
-        from mm.mcp.auth import ApiKeyMiddleware
+        from starlette.applications import Starlette
+        from starlette.responses import JSONResponse
+        from starlette.routing import Mount, Route
+        from mm.mcp.auth import OAuthMCPMiddleware
+
         host = os.environ.get("MCP_HOST", "0.0.0.0")
-        starlette_app = mcp.streamable_http_app()
-        protected_app = ApiKeyMiddleware(starlette_app)
+        base_url = os.environ.get("MCP_BASE_URL", f"http://{host}:{args.port}")
+
+        # OAuth discovery endpoint (RFC 8414) — Claude Mobile reads this
+        async def oauth_metadata(request):
+            return JSONResponse({
+                "issuer": base_url,
+                "token_endpoint": f"{base_url}/token",
+                "grant_types_supported": ["client_credentials"],
+                "token_endpoint_auth_methods_supported": ["client_secret_post"],
+            })
+
+        mcp_app = mcp.streamable_http_app()
+
+        # Compose: discovery route + MCP app, all wrapped with auth middleware
+        composed = Starlette(routes=[
+            Route("/.well-known/oauth-authorization-server", oauth_metadata),
+            Mount("/", app=mcp_app),
+        ])
+        protected_app = OAuthMCPMiddleware(composed)
+
         config = uvicorn.Config(protected_app, host=host, port=args.port, log_level="info")
         server = uvicorn.Server(config)
         asyncio.run(server.serve())
