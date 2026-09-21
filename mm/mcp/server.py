@@ -341,10 +341,14 @@ def main() -> None:
             })
 
         mcp_app = mcp.streamable_http_app()
+        sse_app = mcp.sse_app()
 
-        # Compose: discovery route + MCP app, all wrapped with auth middleware
+        # Compose: discovery route + SSE + streamable HTTP, all wrapped with auth middleware
+        # /sse   — SSE transport (Railway-compatible, use this for Claude web/mobile connectors)
+        # /mcp   — Streamable HTTP transport (Claude Desktop)
         composed = Starlette(routes=[
             Route("/.well-known/oauth-authorization-server", oauth_metadata),
+            Mount("/sse", app=sse_app),
             Mount("/", app=mcp_app),
         ])
         protected_app = OAuthMCPMiddleware(composed)
