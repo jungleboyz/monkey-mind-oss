@@ -118,22 +118,48 @@ That's it. Full setup guide: **[docs/quickstart.md](docs/quickstart.md)**
 
 ## MCP integration (Claude Desktop / Cursor)
 
+### Quickest path — run the installer (macOS)
+
+```bash
+# 1. Make sure the stack is running
+docker compose up -d
+
+# 2. Run the installer
+bash setup-mcp.sh
+```
+
+The installer detects your Claude Desktop config, injects the MCP server entry, and tells you exactly what to do next.
+
+**Then fully quit and relaunch Claude Desktop** — use Cmd+Q or quit from the menu bar icon. Closing the window is not enough. Claude Desktop only loads MCP servers on a full restart.
+
+To verify the stack is reachable before running the installer:
+
+```bash
+bash test-mcp.sh
+```
+
+---
+
+### Manual config (if you prefer)
+
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "monkey-mind": {
-      "command": "python",
-      "args": ["-m", "mm.mcp.server"],
+      "command": "docker",
+      "args": ["compose", "-f", "/path/to/monkey-mind-oss/docker-compose.yml",
+               "exec", "-T", "mcp", "python", "-m", "mm.mcp.server"],
       "env": {
-        "USER_ID": "yourname",
-        "DATA_ROOT": "/Users/yourname/.monkey-mind"
+        "USER_ID": "yourname"
       }
     }
   }
 }
 ```
+
+> **npx / PATH gotcha:** Claude Desktop launches with a minimal PATH — it may not find `docker` even if your terminal can. If you get a connection error, use the full path to docker: run `which docker` in your terminal and paste that path into the `"command"` field (e.g. `"/usr/local/bin/docker"`).
 
 Then ask Claude: *"What should I focus on this week?"* — and it will draw from your health, work, and strategic domains simultaneously.
 
