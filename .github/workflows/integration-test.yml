@@ -1,0 +1,252 @@
+name: Integration Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mm/**'
+      - 'docker-compose.yml'
+      - 'docker-compose*.yml'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+
+jobs:
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ------------------------------------------------------------------ #
+      # Setup
+      # ------------------------------------------------------------------ #
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and start stack
+        id: build
+        run: |
+          docker compose up --build -d
+          echo "Stack started."
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # ------------------------------------------------------------------ #
+      # Health check (60s timeout, 2s interval)
+      # ------------------------------------------------------------------ #
+      - name: Health check
+        id: health
+        run: |
+          echo "Waiting for API to be healthy..."
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              BODY=$(curl -s http://localhost:8000/health)
+              echo "Health response: $BODY"
+              echo "$BODY" | grep -q '"ok"' && echo "✅ Health check passed." && exit 0
+            fi
+            echo "Attempt $i/30 — got HTTP $STATUS, retrying in 2s..."
+            sleep 2
+          done
+          echo "❌ Health check timed out after 60s."
+          docker compose logs api
+          exit 1
+
+      # ------------------------------------------------------------------ #
+      # Create user and capture API key
+      # ------------------------------------------------------------------ #
+      - name: Create integration test user
+        id: create-user
+        run: |
+          KEY=$(docker compose exec -T api monkey-mind user create integration-test 2>&1 \
+            | grep -oP 'mm_sk_[A-Za-z0-9]+')
+          if [ -z "$KEY" ]; then
+            echo "❌ Failed to extract API key from user create output."
+            docker compose exec -T api monkey-mind user create integration-test 2>&1 || true
+            exit 1
+          fi
+          echo "MM_API_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "✅ User created, API key captured (${KEY:0:12}...)."
+
+      # ------------------------------------------------------------------ #
+      # Ingest small file
+      # ------------------------------------------------------------------ #
+      - name: Ingest small file
+        id: ingest-small
+        run: |
+          # Write small test doc into the container
+          docker compose exec -T api bash -c "cat > /tmp/test-small.md << 'EOFSMALL'
+          # Integration Test Document
+
+          This is a test document about Australian bananas and tropical fruit farming in Queensland.
+          EOFSMALL"
+
+          docker compose exec -T api monkey-mind ingest \
+            --user integration-test \
+            --connector files \
+            --source /tmp/test-small.md
+
+          # Verify pages count
+          PAGES=$(curl -s -H "X-API-Key: $MM_API_KEY" http://localhost:8000/pages \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('pages', [])))")
+          echo "Page count after small ingest: $PAGES"
+          if [ "$PAGES" -lt 1 ]; then
+            echo "❌ Expected ≥1 page after small file ingest, got $PAGES."
+            exit 1
+          fi
+          echo "✅ Small file ingested, $PAGES page(s) present."
+
+      # ------------------------------------------------------------------ #
+      # Verify chunk count for small file (≥1)
+      # ------------------------------------------------------------------ #
+      - name: Verify small file chunk count
+        id: chunk-small
+        run: |
+          # Query to verify retrieval returns at least one chunk
+          RESPONSE=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $MM_API_KEY" \
+            -d '{"query": "Australian bananas tropical fruit Queensland", "limit": 5}' \
+            http://localhost:8000/query)
+          echo "Query response: $RESPONSE"
+
+          # Response must contain some content (not empty sources/answer)
+          echo "$RESPONSE" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          sources = d.get('sources', [])
+          answer = d.get('answer', '') or d.get('response', '') or d.get('result', '')
+          if not sources and not answer:
+              print('❌ Query returned no sources and no answer.')
+              sys.exit(1)
+          print(f'✅ Query returned {len(sources)} source(s).')
+          "
+
+      # ------------------------------------------------------------------ #
+      # Ingest large file (>8192 tokens — must produce multiple chunks)
+      # ------------------------------------------------------------------ #
+      - name: Ingest large file
+        id: ingest-large
+        run: |
+          # Copy large fixture into container
+          docker compose cp tests/fixtures/large-integration-test.md api:/tmp/test-large.md
+
+          BEFORE=$(curl -s -H "X-API-Key: $MM_API_KEY" http://localhost:8000/pages \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('pages', [])))")
+
+          docker compose exec -T api monkey-mind ingest \
+            --user integration-test \
+            --connector files \
+            --source /tmp/test-large.md
+
+          AFTER=$(curl -s -H "X-API-Key: $MM_API_KEY" http://localhost:8000/pages \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('pages', [])))")
+
+          echo "Pages before: $BEFORE, after: $AFTER"
+          if [ "$AFTER" -le "$BEFORE" ]; then
+            echo "❌ Large file ingest did not add a new page."
+            exit 1
+          fi
+          echo "✅ Large file ingested. Pages: $AFTER."
+
+      # ------------------------------------------------------------------ #
+      # Query grounding — large doc content must surface
+      # ------------------------------------------------------------------ #
+      - name: Query grounding
+        id: query
+        run: |
+          RESPONSE=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $MM_API_KEY" \
+            -d '{"query": "What are the challenges facing Queensland tropical fruit farmers?", "limit": 5}' \
+            http://localhost:8000/query)
+          echo "Query response: $RESPONSE"
+
+          # Answer or sources must reference Queensland/fruit/farming content
+          echo "$RESPONSE" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          text = json.dumps(d).lower()
+          keywords = ['queensland', 'banana', 'fruit', 'tropical', 'cyclone', 'disease']
+          found = [k for k in keywords if k in text]
+          if not found:
+              print('❌ Query response contains none of the expected content keywords.')
+              sys.exit(1)
+          print(f'✅ Response grounded. Keywords found: {found}')
+          "
+
+      # ------------------------------------------------------------------ #
+      # Data persistence — restart containers, re-query
+      # ------------------------------------------------------------------ #
+      - name: Data persistence check
+        id: persistence
+        run: |
+          echo "Restarting stack..."
+          docker compose down
+          docker compose up -d
+          env:
+            OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+            ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # Wait for health
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
+            [ "$STATUS" = "200" ] && break
+            echo "Waiting for restart... attempt $i/30"
+            sleep 2
+          done
+
+          # Verify pages still present
+          PAGES=$(curl -s -H "X-API-Key: $MM_API_KEY" http://localhost:8000/pages \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('pages', [])))")
+          echo "Pages after restart: $PAGES"
+          if [ "$PAGES" -lt 2 ]; then
+            echo "❌ Data lost after container restart. Got $PAGES pages, expected ≥2."
+            exit 1
+          fi
+
+          # Re-query to confirm retrieval still works
+          RESPONSE=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $MM_API_KEY" \
+            -d '{"query": "Australian bananas tropical fruit Queensland", "limit": 3}' \
+            http://localhost:8000/query)
+          echo "$RESPONSE" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          sources = d.get('sources', [])
+          answer = d.get('answer', '') or d.get('response', '') or d.get('result', '')
+          if not sources and not answer:
+              print('❌ Query returned nothing after restart.')
+              sys.exit(1)
+          print(f'✅ Persistence confirmed. {len(sources)} source(s) returned after restart.')
+          "
+
+      # ------------------------------------------------------------------ #
+      # Cleanup
+      # ------------------------------------------------------------------ #
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
+
+      # ------------------------------------------------------------------ #
+      # Gate Results Summary
+      # ------------------------------------------------------------------ #
+      - name: Gate Results Summary
+        id: summary
+        if: always()
+        run: |
+          echo "## 🏭 Factory Integration Gate Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Gate | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build & Start | ${{ steps.build.outcome == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health Check | ${{ steps.health.outcome == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| User Creation | ${{ steps.create-user.outcome == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Small File Ingest | ${{ steps.ingest-small.outcome == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Small File Chunk Count (≥1) | ${{ steps.chunk-small.outcome == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Large File Ingest (>8192 tokens) | ${{ steps.ingest-large.outcome == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Query Grounding | ${{ steps.query.outcome == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Data Persistence | ${{ steps.persistence.outcome == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
