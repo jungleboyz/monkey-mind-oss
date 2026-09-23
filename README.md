@@ -165,6 +165,19 @@ Then ask Claude: *"What should I focus on this week?"* — and it will draw from
 
 ---
 
+### Remote connectors (Claude web/mobile, ChatGPT) — OAuth
+
+For hosted deployments (e.g. Railway), Monkey Mind's MCP server supports OAuth 2.1 Authorization Code + PKCE (S256) with Dynamic Client Registration (RFC 7591), so it works as a standard remote connector for **claude.ai** and **ChatGPT** — no manual config file editing needed.
+
+1. In Claude or ChatGPT's connector settings, add a custom connector pointing at your deployed MCP URL (e.g. `https://your-mm-instance.up.railway.app/mcp`).
+2. The platform auto-discovers OAuth endpoints via `/.well-known/oauth-authorization-server` and registers itself via `/register`.
+3. You'll be redirected to a login page — enter your `mm_sk_` API key once to authorize the connection.
+4. The platform stores a session token; no key re-entry needed until you revoke access.
+
+Backward-compatible: the legacy OAuth Client Credentials grant and direct `X-API-Key` header still work for existing integrations. stdio transport (local Claude Desktop config above) is completely unaffected — it never touches the OAuth layer.
+
+---
+
 ## CLI reference
 
 ```bash

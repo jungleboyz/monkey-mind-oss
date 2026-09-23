@@ -109,14 +109,26 @@ class TestOAuthToken:
         assert resp.status_code == 401
         assert resp.json()["error"] == "invalid_client"
 
-    def test_wrong_grant_type_returns_400(self, client):
+    def test_unknown_grant_type_returns_400(self, client):
+        resp = client.post("/token", data={
+            "grant_type": "not_a_real_grant",
+            "client_id": "rob",
+            "client_secret": VALID_KEY,
+        })
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "unsupported_grant_type"
+
+    def test_auth_code_grant_without_code_returns_invalid_grant(self, client):
+        # authorization_code IS supported now, but a request missing the
+        # actual `code` parameter should fail as invalid_grant, not be
+        # rejected as an unsupported grant type.
         resp = client.post("/token", data={
             "grant_type": "authorization_code",
             "client_id": "rob",
             "client_secret": VALID_KEY,
         })
         assert resp.status_code == 400
-        assert resp.json()["error"] == "unsupported_grant_type"
+        assert resp.json()["error"] == "invalid_grant"
 
     def test_token_can_be_used_as_bearer(self, client):
         # Get token then use it
