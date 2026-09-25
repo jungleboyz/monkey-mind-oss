@@ -97,7 +97,7 @@ class QueryEngine:
         context_lines: list[str] = []
         for i, chunk in enumerate(chunks, 1):
             meta = chunk.get("metadata", {})
-            path = meta.get("path", meta.get("source", f"chunk-{i}"))
+            path = meta.get("path") or meta.get("source_ref") or meta.get("source", f"chunk-{i}")
             context_lines.append(f"[Source {i}: {path}]\n{chunk['text']}")
         context_block = "\n\n".join(context_lines)
 
@@ -114,7 +114,7 @@ class QueryEngine:
 
         for chunk in chunks:
             meta = chunk.get("metadata", {})
-            path = meta.get("path", meta.get("source", ""))
+            path = meta.get("path") or meta.get("source_ref") or meta.get("source", "")
             if path in seen:
                 continue
             seen.add(path)

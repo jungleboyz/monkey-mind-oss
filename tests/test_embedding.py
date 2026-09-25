@@ -49,6 +49,23 @@ def test_chunk_metadata():
         assert chunk.metadata["domain"] == "health"
         assert chunk.metadata["source"] == "jira"
         assert chunk.metadata["connector"] == "jira-connector"
+        # Provenance: query sources need a timestamp for S7 + staleness
+        assert chunk.metadata["updated_at"]
+
+
+def test_query_sources_use_source_ref_path():
+    """Sources should name the file, not just the connector ('files')."""
+    from mm.api.query import QueryEngine
+    from mm.config.user import UserConfig
+
+    chunks = [{"text": "x", "metadata": {
+        "source": "files", "source_ref": "/notes/plan.md",
+        "domain": "projects", "updated_at": "2026-09-25T00:00:00+00:00",
+    }}]
+    with patch.object(QueryEngine, "_call_llm", return_value="ok"):
+        result = QueryEngine().synthesise("q", chunks, UserConfig.default("u"))
+    assert result["sources"][0]["path"] == "/notes/plan.md"
+    assert result["sources"][0]["updated"]
 
 
 def test_openai_provider_init():
