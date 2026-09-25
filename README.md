@@ -44,7 +44,7 @@ Cross-domain answers. Traced to sources. No hallucination.
 
 ## Quickstart
 
-**Prerequisites:** Docker + Docker Compose. OpenAI API key (embeddings). Anthropic or OpenAI key (synthesis).
+**Prerequisites:** Docker + Docker Compose. OpenAI API key (embeddings). Anthropic or OpenAI key (synthesis). About 10 minutes.
 
 ```bash
 # 1. Clone and configure
@@ -53,21 +53,30 @@ cd monkey-mind-oss
 cp .env.example .env
 # Edit .env — add OPENAI_API_KEY and ANTHROPIC_API_KEY
 
-# 2. Start
+# 2. Put some notes in ./notes (markdown, text or PDF)
+mkdir -p notes && cp -r ~/path/to/your/notes/* notes/
+
+# 3. Start
 docker compose up -d
 
-# 3. Create your user (API key shown once — save it)
-docker compose exec api monkey-mind user create yourname
+# 4. Run the setup wizard (creates your user, connects /notes, ingests, test-queries)
+docker compose exec api monkey-mind setup
+#    - username: pick one
+#    - API key prompts: press Enter (Docker already has them from .env)
+#    - "Where is your context?": 1 (local files), path: /notes
+#    - SAVE the mm_sk_... API key it prints — it is shown once
 
-# 4. Point it at your notes
-docker compose exec api monkey-mind ingest --connector files --user yourname
+# 5. Ask a question
+docker compose exec api monkey-mind query --user yourname "What should I focus on this week?"
 
-# 5. Query
+# ...or over the REST API
 curl -X POST http://localhost:8000/query \
-  -H "Authorization: Bearer mm_sk_YOUR_KEY_HERE" \
+  -H "X-API-Key: mm_sk_YOUR_KEY_HERE" \
   -H "Content-Type: application/json" \
   -d '{"query": "What should I focus on this week?"}'
 ```
+
+Added more notes later? `docker compose exec api monkey-mind ingest --connector files --user yourname`
 
 That's it. Full setup guide: **[docs/quickstart.md](docs/quickstart.md)**
 
@@ -159,6 +168,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
+With Docker, also set `MM_USER_ID=yourname` in `.env` and run `docker compose up -d mcp` so the MCP container serves your user.
+
 > **npx / PATH gotcha:** Claude Desktop launches with a minimal PATH — it may not find `docker` even if your terminal can. If you get a connection error, use the full path to docker: run `which docker` in your terminal and paste that path into the `"command"` field (e.g. `"/usr/local/bin/docker"`).
 
 Then ask Claude: *"What should I focus on this week?"* — and it will draw from your health, work, and strategic domains simultaneously.
@@ -181,15 +192,17 @@ Backward-compatible: the legacy OAuth Client Credentials grant and direct `X-API
 ## CLI reference
 
 ```bash
-monkey-mind setup                          # Interactive setup wizard
-monkey-mind user create <name>             # Create user + generate API key
-monkey-mind ingest --connector files       # Ingest from file connector
-monkey-mind ingest --connector github      # Ingest from GitHub connector
-monkey-mind eval                           # Run quality eval suite (9 scenarios)
-monkey-mind domain add <id> <label>        # Add a domain
-monkey-mind domain rename <id> <label>     # Rename a domain
-monkey-mind domain remove <id>             # Remove a domain
-monkey-mind user delete <name> --confirm   # Delete all user data
+monkey-mind setup                                   # Interactive setup wizard (start here)
+monkey-mind query --user <name> "<question>"        # Ask your context library
+monkey-mind ingest --connector files --user <name>  # Re-ingest after adding notes
+monkey-mind ingest --connector github --user <name> # Ingest from GitHub connector
+monkey-mind eval --api-key mm_sk_...                # Run quality eval suite (9 scenarios)
+monkey-mind user create <name>                      # Create a user + API key only (no connector)
+monkey-mind user rotate-key <name>                  # Issue a new API key
+monkey-mind domain add <id> <label> --user <name>   # Add a domain
+monkey-mind domain rename <id> <label> --user <name>
+monkey-mind domain remove <id> --user <name>
+monkey-mind user delete <name> --confirm            # Delete all user data
 ```
 
 ---

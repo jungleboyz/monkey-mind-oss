@@ -43,35 +43,56 @@ curl http://localhost:8000/health
 # → {"status": "ok"}
 ```
 
-### 3. Create your user
+### 3. Add your notes
+
+The API container reads notes from `./notes` (mounted read-only at `/notes`). Point `MM_NOTES_DIR` in `.env` at another folder if you prefer.
 
 ```bash
-docker compose exec api monkey-mind user create myname
-# → User 'myname' created.
-# → Your API key: mm_sk_ABC123... (save this — shown once)
+mkdir -p notes
+cp -r ~/path/to/your/notes/* notes/
 ```
 
-### 4. Ingest your first content
+Domains (health, professional, strategic, projects, temporal, personal) are detected from file and folder names, so `notes/health/sleep.md` lands in *health*. Anything unmatched goes to *personal*.
 
-**From a folder of notes:**
+### 4. Run the setup wizard
+
 ```bash
-docker compose exec api monkey-mind ingest --connector files --user myname
-# Prompts for directory path
+docker compose exec api monkey-mind setup
 ```
 
-**From GitHub:**
-```bash
-docker compose exec api monkey-mind ingest --connector github --user myname
-# Prompts for GitHub username
-```
+Answer the prompts:
+
+| Prompt | Answer |
+|--------|--------|
+| Username | anything, e.g. `myname` |
+| LLM provider | `1` (anthropic) or `2` (openai) |
+| API key prompts | press **Enter** — Docker already has the keys from `.env` |
+| Where is your context? | `1` (local files) |
+| Directory path | `/notes` |
+
+The wizard creates your user, prints your API key (**save it — shown once**), ingests `/notes`, and runs a test query. You should see `🎉 Your context library is ready!`
+
+> The wizard needs an interactive terminal. `docker compose exec` gives you one; don't add `-T`.
+> `monkey-mind user create` only creates a user and key — it does **not** configure a connector, so `ingest` will say "No connector 'files' configured". Use `setup`.
 
 ### 5. Query your context
 
+From the CLI:
+```bash
+docker compose exec api monkey-mind query --user myname "What should I focus on this week?"
+```
+
+Or over REST (note the header is `X-API-Key`, not `Authorization: Bearer`):
 ```bash
 curl -X POST http://localhost:8000/query \
   -H "X-API-Key: mm_sk_ABC123..." \
   -H "Content-Type: application/json" \
   -d '{"query": "What should I focus on this week?"}'
+```
+
+Added or edited notes? Re-ingest (existing pages are updated, not duplicated):
+```bash
+docker compose exec api monkey-mind ingest --connector files --user myname
 ```
 
 ### 6. Connect to Claude Desktop (MCP)
@@ -92,6 +113,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
   }
 }
 ```
+
+Set `MM_USER_ID=myname` in `.env` and run `docker compose up -d mcp` so the MCP container serves your user (it defaults to `default`).
 
 Or for local install (Path B), use the simpler config from the README.
 
@@ -123,6 +146,13 @@ The wizard walks you through:
 
 Target: **working context library in under 30 minutes.**
 
+Keys you enter in the wizard are saved to `~/.monkey-mind/.env` and loaded automatically by the CLI and API server.
+
+Query from the CLI straight away:
+```bash
+monkey-mind query --user myname "What should I focus on this week?"
+```
+
 ### 3. Start the API server
 
 ```bash
@@ -146,7 +176,10 @@ Check the quality of your context library:
 
 ```bash
 monkey-mind eval --api-url http://localhost:8000 --api-key mm_sk_ABC123...
+# Docker: docker compose exec api monkey-mind eval --api-key mm_sk_ABC123...
 ```
+
+The key can also come from the `MM_API_KEY` environment variable. Cross-domain scenarios (S2, S8) need notes in at least two domains.
 
 Output:
 ```
@@ -173,9 +206,9 @@ monkey-mind eval --api-url http://localhost:8000 --api-key mm_sk_... --output js
 ## Managing Domains
 
 ```bash
-monkey-mind domain add finances "Finances"       # Add new domain
-monkey-mind domain rename health "Wellbeing"     # Rename existing
-monkey-mind domain remove projects               # Remove domain
+monkey-mind domain add finances "Finances" --user myname     # Add new domain
+monkey-mind domain rename health "Wellbeing" --user myname   # Rename existing
+monkey-mind domain remove projects --user myname             # Remove domain
 ```
 
 ---
@@ -183,10 +216,19 @@ monkey-mind domain remove projects               # Remove domain
 ## Troubleshooting
 
 **"Collection not found" on first query**
-→ You haven't ingested any content yet. Run `monkey-mind ingest --connector files`.
+→ You haven't ingested any content yet. Run `monkey-mind ingest --connector files --user myname`.
+
+**"No connector 'files' configured for user"**
+→ The user was made with `user create`, which doesn't set up connectors. Run `monkey-mind setup` with the same username and choose to reconfigure.
+
+**"Path does not exist" in Docker**
+→ Inside the container your notes are at `/notes`, not your host path. Check `MM_NOTES_DIR` in `.env` and restart with `docker compose up -d`.
+
+**Query returns 500**
+→ Usually a missing or placeholder LLM key. Check `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` in `.env`, then `docker compose up -d` to reload.
 
 **401 Unauthorized**
-→ Check your API key. Keys are shown once at creation. Rotate with `monkey-mind user rotate-key myname`.
+→ Check your API key and that you're sending it as `X-API-Key`. Keys are shown once at creation. Rotate with `monkey-mind user rotate-key myname`.
 
 **Slow embeddings**
 → `text-embedding-3-small` is fast. If using Ollama, ensure the model is pulled: `ollama pull nomic-embed-text`.
