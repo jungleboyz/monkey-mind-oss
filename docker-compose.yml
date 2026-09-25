@@ -8,6 +8,8 @@ services:
       - "${API_PORT:-8000}:8000"
     volumes:
       - mm_data:/data
+      # Your notes, read-only — point the files connector at /notes
+      - ${MM_NOTES_DIR:-./notes}:/notes:ro
     environment:
       - DATA_ROOT=/data
       - OPENAI_API_KEY

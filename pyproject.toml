@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "monkey-mind"
-version = "0.1.0"
+version = "0.2.0"
 description = "Your AI tools forget you every conversation. Monkey Mind remembers everything, across every tool, forever."
 readme = "README.md"
 license = {file = "LICENSE"}

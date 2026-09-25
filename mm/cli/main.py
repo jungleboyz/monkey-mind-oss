@@ -15,7 +15,11 @@ app.add_typer(user_app, name="user")
 app.add_typer(domain_app, name="domain")
 
 import os
+from mm import __version__
+from mm.config.env import load_data_root_env
+
 DATA_ROOT = Path(os.environ.get('DATA_ROOT', str(Path.home() / '.monkey-mind')))
+load_data_root_env(DATA_ROOT)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -212,17 +216,24 @@ def ingest(
         typer.echo(f"✗ Validation failed: {msg}", err=True)
         raise typer.Exit(1)
 
+    from mm.embedding.providers import EmbeddingProvider
+    from mm.ingestion.runner import run_connector
+
     typer.echo(f"Ingesting via '{connector}'...")
+    embed_provider = EmbeddingProvider.from_config(
+        {"provider": cfg.embedding.provider, "model": cfg.embedding.model}
+    )
+    result = run_connector(conn_obj, store, embed_provider, dry_run=dry_run)
 
-    def _progress(done: int, total: int, note: str = "") -> None:
-        if total:
-            typer.echo(f"  {done}/{total} {note}")
-
-    pages = conn_obj.ingest(progress_cb=_progress)
-    typer.echo(f"✓ Ingested {len(pages)} page(s) via '{connector}'.")
-
-    if not dry_run:
-        typer.echo("  (Pass --dry-run to skip writing to store.)")
+    if dry_run:
+        typer.echo(f"✓ Dry run: {result['chunks_total']} chunk(s) built, nothing written.")
+    else:
+        pages_n = result["pages_created"] + result["pages_updated"]
+        typer.echo(
+            f"✓ Ingested {pages_n} page(s) via '{connector}' "
+            f"({result['pages_created']} new, {result['pages_updated']} updated, "
+            f"{result['chunks_total']} chunks)."
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -230,9 +241,32 @@ def ingest(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.command()
-def query(q: str = typer.Argument(..., help="Your question")):
+def query(
+    q: str = typer.Argument(..., help="Your question"),
+    username: str = typer.Option(..., '--user', '-u', help='Username to query as'),
+    limit: int = typer.Option(10, '--limit', help='Max chunks to retrieve'),
+):
     """Query your context library."""
-    typer.echo("Query coming in CL-T6.")
+    from mm.api.query import QueryEngine
+    from mm.core.store import UserStore
+
+    store = UserStore(DATA_ROOT, username)
+    if not store.config_path.exists():
+        typer.echo(f"No config found for user '{username}'. Run 'monkey-mind setup' first.", err=True)
+        raise typer.Exit(1)
+
+    engine = QueryEngine()
+    chunks = engine.retrieve(store, q, limit=limit)
+    result = engine.synthesise(q, chunks, store.get_config())
+
+    typer.echo(result["answer"])
+    if result.get("sources"):
+        typer.echo("\nSources:")
+        for src in result["sources"]:
+            domain = f" [{src['domain']}]" if src.get("domain") else ""
+            typer.echo(f"  - {src['path']}{domain}")
+    for warning in result.get("staleness_warnings", []):
+        typer.echo(f"⚠ {warning}", err=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -240,15 +274,17 @@ def query(q: str = typer.Argument(..., help="Your question")):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.command()
-def eval(output: str = typer.Option("text", help="Output format: text | json")):
-    """Run the eval suite against your context library."""
-    try:
-        from mm.eval import runner  # type: ignore[import]
+def eval(
+    api_url: str = typer.Option("http://localhost:8000", '--api-url', help='Running Monkey Mind API'),
+    api_key: str = typer.Option(..., '--api-key', envvar='MM_API_KEY', help='Your mm_sk_ API key'),
+    output: str = typer.Option("text", help="Output format: text | json"),
+):
+    """Run the eval suite against a running Monkey Mind API."""
+    from mm.eval.runner import print_results, run_all
+
+    if output == "text":
         typer.echo("Running eval suite...")
-        runner.run()
-    except (ImportError, AttributeError):
-        typer.echo("Eval not available — run after CL-T9 is built.")
-        raise typer.Exit(0)
+    print_results(run_all(api_url=api_url, api_key=api_key), output=output)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -261,7 +297,7 @@ def version(
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit"),
 ):
     if version:
-        typer.echo("monkey-mind 0.1.0")
+        typer.echo(f"monkey-mind {__version__}")
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
