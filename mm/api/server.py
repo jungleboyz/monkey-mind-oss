@@ -14,7 +14,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
 from mm import __version__
-from mm.auth.keys import load_key_hash, verify_key
+from mm.auth.keys import load_key_hash, seed_key_from_env, verify_key
 from mm.config.env import load_data_root_env
 from mm.core.store import UserStore
 
@@ -26,6 +26,8 @@ app = FastAPI(
 
 DATA_ROOT = Path(os.environ.get("DATA_ROOT", "./data"))
 load_data_root_env(DATA_ROOT)
+# Same default as /bootstrap below.
+seed_key_from_env(DATA_ROOT, os.environ.get("USER_ID", "rob"), "mm-api")
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 

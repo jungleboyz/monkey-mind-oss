@@ -31,3 +31,27 @@ def load_key_hash(user_dir: Path) -> str | None:
     """Load hash from user_dir/api_key.hash. Returns None if not found."""
     p = user_dir / 'api_key.hash'
     return p.read_text().strip() if p.exists() else None
+
+
+def seed_key_from_env(data_root: Path, user_id: str, service: str) -> None:
+    """If MM_OSS_API_KEY is set, make it user_id's API key.
+
+    Lets a Railway variable change rotate the key on redeploy, without editing
+    the volume. Also logs which users exist, since the API accepts any user's
+    key and an old test user would keep its key working.
+    """
+    users_dir = Path(data_root) / "users"
+    if users_dir.is_dir():
+        names = sorted(p.name for p in users_dir.iterdir() if (p / "api_key.hash").exists())
+        print(f"[{service}] users with API keys: {', '.join(names) or '(none)'}")
+
+    raw_key = os.environ.get("MM_OSS_API_KEY", "")
+    if not raw_key.startswith("mm_sk_"):
+        return
+    user_dir = users_dir / user_id
+    stored = load_key_hash(user_dir)
+    if stored and verify_key(raw_key, stored):
+        return  # already in sync — bcrypt is slow, don't rewrite every boot
+    user_dir.mkdir(parents=True, exist_ok=True)
+    save_key_hash(user_dir, bcrypt.hashpw(raw_key.encode(), bcrypt.gensalt()).decode("utf-8"))
+    print(f"[{service}] API key hash seeded from MM_OSS_API_KEY for user '{user_id}'")
