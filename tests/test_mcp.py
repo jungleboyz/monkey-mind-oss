@@ -222,3 +222,29 @@ class TestGetStalenessReport:
         data = json.loads(result["content"][0]["text"])
         assert data["count"] == 1
         assert data["stale_pages"][0]["domain"] == "health"
+
+
+def test_http_app_mounts_streamable_mcp_for_remote_hosts():
+    """claude.ai/ChatGPT call /mcp on a public host. Regression: /mcp was built
+    but never mounted (404 after OAuth), and the SDK's localhost-only host check
+    answered 421 to *.up.railway.app."""
+    from starlette.responses import JSONResponse
+    from starlette.testclient import TestClient
+
+    from mm.mcp.server import build_http_app
+
+    async def meta(request):
+        return JSONResponse({})
+
+    app = build_http_app("0.0.0.0", meta)
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert {"/mcp", "/sse", "/messages"} <= paths
+
+    init = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {},
+        "clientInfo": {"name": "t", "version": "1"}}}
+    with TestClient(app, base_url="https://mm-mcp-production.up.railway.app") as client:
+        r = client.post("/mcp", json=init,
+                        headers={"Accept": "application/json, text/event-stream"})
+    assert r.status_code == 200, r.text
+    assert "mcp-session-id" in r.headers
