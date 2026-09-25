@@ -281,6 +281,32 @@ def _seed_api_key_from_env() -> None:
     )
 
 
+def build_http_app(host: str, oauth_metadata):
+    """Compose discovery + streamable HTTP (/mcp) + SSE (/sse, /messages).
+
+    - /mcp is what claude.ai and ChatGPT connectors call. It used to be built
+      but never mounted, so every request 404'd after a successful OAuth login.
+    - `host` must be the real bind host: the SDK enables DNS-rebinding
+      protection for the default 127.0.0.1, which answers 421 to any other
+      Host header (e.g. *.up.railway.app).
+    - The streamable app's lifespan runs the session manager; without it /mcp
+      requests fail once mounted.
+    """
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    mcp_app = mcp.streamable_http_app(host=host)
+    sse_app = mcp.sse_app(host=host)
+    return Starlette(
+        routes=[
+            Route("/.well-known/oauth-authorization-server", oauth_metadata),
+            *mcp_app.routes,
+            *sse_app.routes,
+        ],
+        lifespan=mcp_app.router.lifespan_context,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monkey Mind MCP server")
     parser.add_argument(
@@ -305,9 +331,7 @@ def main() -> None:
         # Wrapped with OAuthMCPMiddleware: handles /token (client credentials) and
         # validates Bearer / X-API-Key on all MCP requests.
         import uvicorn
-        from starlette.applications import Starlette
         from starlette.responses import JSONResponse
-        from starlette.routing import Mount, Route
         from mm.mcp.auth import OAuthMCPMiddleware
 
         host = os.environ.get("MCP_HOST", "0.0.0.0")
@@ -322,17 +346,7 @@ def main() -> None:
                 "token_endpoint_auth_methods_supported": ["client_secret_post"],
             })
 
-        mcp_app = mcp.streamable_http_app()
-        sse_app = mcp.sse_app()
-
-        # Compose: discovery route + SSE + streamable HTTP, all wrapped with auth middleware
-        # /sse      — SSE GET endpoint (Railway-compatible, use for Claude web/mobile connectors)
-        # /messages — SSE POST endpoint (client→server messages, paired with /sse)
-        # /mcp      — Streamable HTTP transport (Claude Desktop)
-        composed = Starlette(routes=[
-            Route("/.well-known/oauth-authorization-server", oauth_metadata),
-            Mount("/", app=sse_app),
-        ])
+        composed = build_http_app(host, oauth_metadata)
         protected_app = OAuthMCPMiddleware(composed)
 
         config = uvicorn.Config(protected_app, host=host, port=args.port, log_level="info")
