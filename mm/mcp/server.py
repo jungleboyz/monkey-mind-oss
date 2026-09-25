@@ -272,31 +272,13 @@ def get_staleness_report(domain: Optional[str] = None) -> dict:
 
 
 def _seed_api_key_from_env() -> None:
-    """If MM_OSS_API_KEY is set, ensure the hash file matches it.
-    This lets Railway env var changes take effect on redeploy without manual volume edits."""
-    raw_key = os.environ.get("MM_OSS_API_KEY", "")
-    if not raw_key or not raw_key.startswith("mm_sk_"):
-        return
-    data_root = Path(os.environ.get("DATA_ROOT", "./data"))
-    user_id = os.environ.get("USER_ID", "default")
-    user_dir = data_root / "users" / user_id
-    hash_file = user_dir / "api_key.hash"
-    # Check if existing hash matches — avoid rewriting on every boot (bcrypt is slow)
-    if hash_file.exists():
-        try:
-            import bcrypt
-            stored = hash_file.read_text().strip()
-            if bcrypt.checkpw(raw_key.encode(), stored.encode()):
-                return  # already in sync
-        except Exception:
-            pass
-    # Write new hash
-    from mm.auth.keys import generate_key as _gk
-    import bcrypt
-    user_dir.mkdir(parents=True, exist_ok=True)
-    hashed = bcrypt.hashpw(raw_key.encode(), bcrypt.gensalt()).decode()
-    hash_file.write_text(hashed)
-    print(f"[mm-mcp] API key hash seeded from MM_OSS_API_KEY for user '{user_id}'")
+    from mm.auth.keys import seed_key_from_env
+
+    seed_key_from_env(
+        Path(os.environ.get("DATA_ROOT", "./data")),
+        os.environ.get("USER_ID", "default"),
+        "mm-mcp",
+    )
 
 
 def main() -> None:
