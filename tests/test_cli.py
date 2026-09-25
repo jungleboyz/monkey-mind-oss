@@ -148,13 +148,21 @@ class TestIngest:
             mock_instance.ingest.return_value = [MagicMock(), MagicMock()]
             MockConnector.return_value = mock_instance
 
-            result = runner.invoke(app, [
-                "ingest", "--connector", "files", "--user", "ingrid"
-            ])
+            with patch("mm.ingestion.runner.run_connector") as mock_run, \
+                 patch("mm.embedding.providers.EmbeddingProvider.from_config"):
+                mock_run.return_value = {
+                    "pages_created": 2, "pages_updated": 0,
+                    "chunks_total": 4, "status": "ok",
+                }
+                result = runner.invoke(app, [
+                    "ingest", "--connector", "files", "--user", "ingrid"
+                ])
 
         assert result.exit_code == 0, result.output
         assert mock_instance.validate.called
-        assert mock_instance.ingest.called
+        # Regression: ingest must write to the store, not just read pages
+        assert mock_run.called
+        assert mock_run.call_args.kwargs["dry_run"] is False
         assert "2 page(s)" in result.output
 
     def test_ingest_unknown_connector_fails(self, tmp_data_root):
@@ -192,11 +200,68 @@ class TestIngest:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestEval:
-    def test_eval_when_not_available(self):
-        """eval command should exit cleanly when mm.eval.runner doesn't exist."""
+    def test_eval_requires_api_key(self, monkeypatch):
+        monkeypatch.delenv("MM_API_KEY", raising=False)
         result = runner.invoke(app, ["eval"])
-        assert result.exit_code == 0
-        assert "CL-T9" in result.output
+        assert result.exit_code != 0
+
+    def test_eval_runs_suite(self):
+        with patch("mm.eval.runner.run_all") as mock_run, \
+             patch("mm.eval.runner.print_results") as mock_print:
+            result = runner.invoke(app, [
+                "eval", "--api-url", "http://mm:8000", "--api-key", "mm_sk_x",
+                "--output", "json",
+            ])
+        assert result.exit_code == 0, result.output
+        mock_run.assert_called_once_with(api_url="http://mm:8000", api_key="mm_sk_x")
+        assert mock_print.call_args.kwargs["output"] == "json"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# query command
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestQuery:
+    def test_query_unknown_user_fails(self, tmp_data_root):
+        result = runner.invoke(app, ["query", "hello", "--user", "nobody"])
+        assert result.exit_code != 0
+
+    def test_query_prints_answer_and_sources(self, tmp_data_root):
+        _make_user(tmp_data_root, "quinn")
+        with patch("mm.api.query.QueryEngine") as MockEngine:
+            engine = MockEngine.return_value
+            engine.retrieve.return_value = [{"text": "x", "metadata": {}}]
+            engine.synthesise.return_value = {
+                "answer": "Focus on the release.",
+                "sources": [{"path": "notes/plan.md", "domain": "projects", "updated": ""}],
+                "staleness_warnings": [],
+            }
+            result = runner.invoke(app, ["query", "What now?", "--user", "quinn"])
+        assert result.exit_code == 0, result.output
+        assert "Focus on the release." in result.output
+        assert "notes/plan.md [projects]" in result.output
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# data-root .env loading
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDataRootEnv:
+    def test_loads_keys_without_overriding_env(self, tmp_path, monkeypatch):
+        from mm.config.env import load_data_root_env
+
+        (tmp_path / ".env").write_text("# saved by wizard\nMM_T_A=from-file\nMM_T_B=from-file\n")
+        monkeypatch.delenv("MM_T_A", raising=False)
+        monkeypatch.setenv("MM_T_B", "from-shell")
+        load_data_root_env(tmp_path)
+        import os
+        assert os.environ["MM_T_A"] == "from-file"
+        assert os.environ["MM_T_B"] == "from-shell"
+        monkeypatch.delenv("MM_T_A")
+
+    def test_missing_file_is_noop(self, tmp_path):
+        from mm.config.env import load_data_root_env
+        load_data_root_env(tmp_path)  # no error
 
 
 # ─────────────────────────────────────────────────────────────────────────────

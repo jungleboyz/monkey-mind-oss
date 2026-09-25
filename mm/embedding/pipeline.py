@@ -1,4 +1,5 @@
 """Embedding pipeline: chunking and upsert logic."""
+import datetime
 from typing import Callable, Any
 
 from mm.connectors.base import ConnectorPage, Chunk
@@ -37,6 +38,7 @@ def build_chunks(pages: list[ConnectorPage]) -> list[Chunk]:
     - Small files with no ## headings are emitted as a single 'content' chunk.
     """
     chunks = []
+    ingested_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     for page in pages:
         tags_str = ", ".join(page.tags) if isinstance(page.tags, list) else str(page.tags)
         base_meta: dict[str, Any] = {
@@ -50,6 +52,7 @@ def build_chunks(pages: list[ConnectorPage]) -> list[Chunk]:
             "staleness_threshold_days": str(page.staleness_threshold_days),
             "page_id": page.id,
             "title": page.title,
+            "updated_at": ingested_at,
         }
 
         page_had_content = False
