@@ -7,7 +7,7 @@
 # runtime image, and the app runs as an unprivileged user (uid 10001), not root.
 
 # ── Build stage: compilers live here only ────────────────────────────────────
-FROM python:3.11-slim@sha256:bab1b7ef4b450c81002278d035eff85ebe394ae94df904f7a3ba14f7e16e487b AS build
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -28,7 +28,7 @@ COPY mm/ ./mm/
 RUN uv pip install --python /opt/venv/bin/python --no-cache --no-deps .
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
-FROM python:3.11-slim@sha256:bab1b7ef4b450c81002278d035eff85ebe394ae94df904f7a3ba14f7e16e487b
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 # Pick up Debian security fixes released since the base digest was pinned (the image
 # scan in CI fails on fixable HIGH/CRITICAL). curl is used by the compose healthcheck.
